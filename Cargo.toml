@@ -1,0 +1,16 @@
+[package]
+name = "ss-ecdsa-poc"
+version = "0.1.0"
+authors = ["LLFourn <lloyd.fourn@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+
+curv = { git = "https://github.com/KZen-networks/curv", features = [ "ec_secp256k1" ] }
+multi-party-ecdsa = { git = "https://github.com/coblox/multi-party-ecdsa" }
+paillier = { git = "https://github.com/KZen-networks/rust-paillier"}
+zk-paillier = { git = "https://github.com/KZen-networks/zk-paillier"}
+bitcoin_hashes = "0.3"
+

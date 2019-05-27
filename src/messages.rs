@@ -1,4 +1,4 @@
-use curv::{cryptographic_primitives::proofs::sigma_ec_ddh::ECDDHProof, BigInt, GE};
+use curv::{cryptographic_primitives::proofs::sigma_ec_ddh::ECDDHProof, BigInt, FE, GE};
 use multi_party_ecdsa::protocols::two_party_ecdsa::lindell_2017::{party_one, party_two};
 use zk_paillier::zkproofs::{NICorrectKeyProof, RangeProofNi};
 
@@ -28,9 +28,14 @@ pub struct SignMsg3 {
 }
 
 pub struct SignMsg4 {
-    pub s_tag_tag: BigInt,
+    pub s_tag_tag: FE,
 }
 
 pub struct BlockchainMsg {
-    pub signature: party_one::Signature,
+    pub signature: Signature,
+}
+
+pub struct Signature {
+    pub Rx: BigInt,
+    pub s: FE,
 }

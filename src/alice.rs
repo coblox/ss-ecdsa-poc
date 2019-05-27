@@ -1,7 +1,7 @@
 use crate::{ecdsa, messages::*};
 use curv::{
     elliptic::curves::traits::{ECPoint, ECScalar},
-    BigInt, FE, GE,
+    FE, GE,
 };
 use multi_party_ecdsa::protocols::two_party_ecdsa::lindell_2017::{party_one, party_two};
 
@@ -25,12 +25,12 @@ impl KeyPair {
 
 #[derive(Clone, Debug)]
 pub struct Alice1 {
-    m: BigInt,
+    pub m: FE,
     pub y: KeyPair,
 }
 
 impl Alice1 {
-    pub fn new(m: BigInt) -> (Alice1, GE) {
+    pub fn new(m: FE) -> (Alice1, GE) {
         let _self = Alice1 {
             y: KeyPair::new_random(),
             m,
@@ -57,7 +57,7 @@ impl Alice1 {
 }
 
 pub struct Alice2 {
-    m: BigInt,
+    m: FE,
     y: KeyPair,
     x2: party_two::EcKeyPair,
     bob_keygen_first_msg: party_one::KeyGenFirstMsg,
@@ -102,7 +102,7 @@ impl Alice2 {
 }
 
 pub struct Alice3 {
-    m: BigInt,
+    m: FE,
     y: KeyPair,
     X: GE,
     x2: party_two::EcKeyPair,
@@ -129,7 +129,7 @@ impl Alice3 {
 }
 
 pub struct Alice4 {
-    m: BigInt,
+    m: FE,
     y: KeyPair,
     X: GE,
     x2: party_two::EcKeyPair,
@@ -163,7 +163,7 @@ impl Alice4 {
 }
 
 pub struct Alice5 {
-    m: BigInt,
+    m: FE,
     y: KeyPair,
     X: GE,
     x2: party_two::EcKeyPair,
@@ -207,7 +207,7 @@ impl Alice5 {
             &party_two::Party2Private::set_private_key(&self.x2),
             &self.r2,
             &(R1 * self.y.secret_key),
-            &self.m,
+            &self.m.to_big_int(),
         )
         .c3;
 
@@ -229,7 +229,7 @@ impl Alice5 {
 }
 
 pub struct Alice6 {
-    m: BigInt,
+    m: FE,
     y: KeyPair,
     X: GE,
     R: GE,
@@ -241,20 +241,20 @@ impl Alice6 {
         Ok(((), BlockchainMsg { signature }))
     }
 
-    fn compute_signature(&self, s_tag_tag: BigInt) -> Result<party_one::Signature, ()> {
-        let s_tag_tag: FE = ECScalar::from(&s_tag_tag);
+    fn compute_signature(&self, s_tag_tag: FE) -> Result<Signature, ()> {
         let mut s = (s_tag_tag * self.y.secret_key.invert()).to_big_int();
         let neg_s = FE::q() - s.clone();
         if s > neg_s {
             s = neg_s;
         }
-        let rx = self.R.x_coor().unwrap();
+        let s = ECScalar::from(&s);
+        let Rx = self.R.x_coor().unwrap();
 
-        if !ecdsa::verify(&self.m, &rx, &s, &self.X) {
+        if !ecdsa::verify(&self.m, &Rx, &s, &self.X) {
             return Err(());
         }
 
-        let signature = party_one::Signature { r: rx, s };
+        let signature = Signature { Rx, s };
 
         Ok(signature)
     }

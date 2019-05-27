@@ -1,12 +1,12 @@
 #![allow(non_snake_case)]
 use bitcoin_hashes::{self, Hash};
-use curv::BigInt;
+use curv::{elliptic::curves::traits::ECScalar, BigInt, FE};
 use ss_ecdsa_poc::{alice::Alice1, bob::Bob1};
 
 pub fn main() -> Result<(), ()> {
     // This is the message that Alice wants a signature on
     let message = bitcoin_hashes::sha256d::Hash::hash(b"Bob pays Alice 10 BTC");
-    let message = BigInt::from(&message[..]);
+    let message: FE = ECScalar::from(&BigInt::from(&message[..]));
     {
         // KEY GENERATION
         // Y is the public key Bob wants to know the private key for

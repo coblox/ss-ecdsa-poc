@@ -8,14 +8,14 @@ use multi_party_ecdsa::protocols::two_party_ecdsa::lindell_2017::{party_one, par
 
 #[derive(Debug)]
 pub struct Bob1 {
-    m: BigInt,
+    m: FE,
     Y: GE,
     commitment_opening: party_one::CommWitness,
     key_half: party_one::EcKeyPair,
 }
 
 impl Bob1 {
-    pub fn new(Y: GE, m: BigInt) -> (Bob1, KeyGenMsg1) {
+    pub fn new(Y: GE, m: FE) -> (Bob1, KeyGenMsg1) {
         let (commited_public_key, commitment_opening, key_half) =
             party_one::KeyGenFirstMsg::create_commitments();
         (
@@ -71,7 +71,7 @@ impl Bob1 {
 }
 
 pub struct Bob2 {
-    m: BigInt,
+    m: FE,
     Y: GE,
     x1: party_one::Party1Private,
     pq_and_c: party_one::PaillierKeyPair,
@@ -100,7 +100,7 @@ impl Bob2 {
 }
 
 pub struct Bob3 {
-    m: BigInt,
+    m: FE,
     Y: GE,
     x1: party_one::Party1Private,
     pq_and_c: party_one::PaillierKeyPair,
@@ -126,7 +126,6 @@ impl Bob3 {
                 m: self.m,
                 Y: self.Y,
                 X: self.X,
-                x1: self.x1,
                 pq_and_c: self.pq_and_c,
             },
             keygen_msg_7,
@@ -135,10 +134,9 @@ impl Bob3 {
 }
 
 pub struct Bob4 {
-    m: BigInt,
+    m: FE,
     Y: GE,
     X: GE,
-    x1: party_one::Party1Private,
     pq_and_c: party_one::PaillierKeyPair,
 }
 
@@ -151,7 +149,6 @@ impl Bob4 {
                 m: self.m,
                 Y: self.Y,
                 X: self.X,
-                x1: self.x1,
                 pq_and_c: self.pq_and_c,
                 alice_commitment: msg,
                 r1,
@@ -162,10 +159,9 @@ impl Bob4 {
 }
 
 pub struct Bob5 {
-    m: BigInt,
+    m: FE,
     Y: GE,
     X: GE,
-    x1: party_one::Party1Private,
     pq_and_c: party_one::PaillierKeyPair,
     alice_commitment: party_two::EphKeyGenFirstMsg,
     r1: party_one::EphEcKeyPair,
@@ -191,9 +187,8 @@ impl Bob5 {
             })
             .map_err(|_| ())?;
 
-        self.verify_c_3(&msg)?;
-
-        let s_tag_tag = party_one::Signature::compute(&self.x1, &msg.c3, &self.r1, &msg.R3).s;
+        let s_tag = self.extract_s_tag(&msg)?;
+        let s_tag_tag = s_tag * self.r1.secret_share.invert();
 
         Ok((
             Bob6 {
@@ -206,18 +201,18 @@ impl Bob5 {
         ))
     }
 
-    fn verify_c_3(&self, msg: &SignMsg3) -> Result<(), ()> {
+    fn extract_s_tag(&self, msg: &SignMsg3) -> Result<FE, ()> {
         use paillier::{traits::Decrypt, Paillier, RawCiphertext};
         let s_tag: FE =
             ECScalar::from(&Paillier::decrypt(&self.pq_and_c.dk, &RawCiphertext::from(&msg.c3)).0);
-        let m_fe: FE = ECScalar::from(&self.m);
         let g = GE::generator();
         let R2 = msg.commitment_opening.comm_witness.public_share;
         let R = msg.R3 * self.r1.secret_share;
         let rx: FE = ECScalar::from(&R.x_coor().unwrap());
 
-        if R2 * s_tag == self.X * rx + g * m_fe {
-            Ok(())
+        // is s_tag actually what we wanted?
+        if R2 * s_tag == self.X * rx + g * self.m {
+            Ok(s_tag)
         } else {
             Err(())
         }
@@ -225,15 +220,15 @@ impl Bob5 {
 }
 
 pub struct Bob6 {
-    m: BigInt,
+    m: FE,
     Y: GE,
     X: GE,
-    s_tag_tag: BigInt,
+    s_tag_tag: FE,
 }
 
 impl Bob6 {
     pub fn receive_message(self, msg: BlockchainMsg) -> Result<(Bob7, ()), ()> {
-        if !ecdsa::verify(&self.m, &msg.signature.r, &msg.signature.s, &self.X) {
+        if !ecdsa::verify(&self.m, &msg.signature.Rx, &msg.signature.s, &self.X) {
             return Err(());
         }
 
@@ -245,9 +240,9 @@ impl Bob6 {
         ))
     }
 
-    fn extract_y(&self, s: BigInt) -> Result<FE, ()> {
+    fn extract_y(&self, s: FE) -> Result<FE, ()> {
         let q = FE::q();
-        let y_maybe = BigInt::mod_mul(&s.invert(&q).unwrap(), &self.s_tag_tag, &q);
+        let y_maybe = BigInt::mod_mul(&s.invert().to_big_int(), &self.s_tag_tag.to_big_int(), &q);
         let y_maybe_fe = ECScalar::from(&y_maybe);
         let Y_maybe: GE = GE::generator() * y_maybe_fe;
 

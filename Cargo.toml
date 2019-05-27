@@ -12,5 +12,6 @@ curv = { git = "https://github.com/KZen-networks/curv", features = [ "ec_secp256
 multi-party-ecdsa = { git = "https://github.com/coblox/multi-party-ecdsa" }
 paillier = { git = "https://github.com/KZen-networks/rust-paillier"}
 zk-paillier = { git = "https://github.com/KZen-networks/zk-paillier"}
+secp256k1 = "0.12"
 bitcoin_hashes = "0.3"
 

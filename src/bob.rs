@@ -1,4 +1,4 @@
-use crate::messages::*;
+use crate::{ecdsa, messages::*};
 use curv::{
     arithmetic::traits::Modulo,
     elliptic::curves::traits::{ECPoint, ECScalar},
@@ -233,7 +233,10 @@ pub struct Bob6 {
 
 impl Bob6 {
     pub fn receive_message(self, msg: BlockchainMsg) -> Result<(Bob7, ()), ()> {
-        party_one::verify(&msg.signature, &self.X, &self.m).map_err(|_| ())?;
+        if !ecdsa::verify(&self.m, &msg.signature.r, &msg.signature.s, &self.X) {
+            return Err(());
+        }
+
         Ok((
             Bob7 {
                 y: self.extract_y(msg.signature.s)?,

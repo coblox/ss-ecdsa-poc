@@ -1,4 +1,4 @@
-use crate::messages::*;
+use crate::{ecdsa, messages::*};
 use curv::{
     elliptic::curves::traits::{ECPoint, ECScalar},
     BigInt, FE, GE,
@@ -248,13 +248,14 @@ impl Alice6 {
         if s > neg_s {
             s = neg_s;
         }
-        let rx: FE = ECScalar::from(&self.R.x_coor().unwrap());
-        let signature = party_one::Signature {
-            r: rx.to_big_int(),
-            s,
-        };
+        let rx = self.R.x_coor().unwrap();
 
-        party_one::verify(&signature, &self.X, &self.m).map_err(|_| ())?;
+        if !ecdsa::verify(&self.m, &rx, &s, &self.X) {
+            return Err(());
+        }
+
+        let signature = party_one::Signature { r: rx, s };
+
         Ok(signature)
     }
 }

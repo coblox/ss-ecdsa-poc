@@ -1,8 +1,12 @@
+cargo-features = ["default-run"]
+
 [package]
 name = "ss-ecdsa-poc"
 version = "0.1.0"
 authors = ["LLFourn <lloyd.fourn@gmail.com>"]
 edition = "2018"
+default-run = "ss_ecdsa_poc"
+
 
 [dependencies]
 

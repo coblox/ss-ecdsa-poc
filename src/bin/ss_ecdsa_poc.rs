@@ -20,13 +20,13 @@ pub fn main() -> Result<(), ()> {
         let (bob, keygen_msg_3) = bob.receive_message(keygen_msg_2)?;
         println!("[BOB => ALICE] Opens his commitment, sends c = PaillierEncrypt(x₁), N  and proofs for N");
         let (alice, keygen_msg_4) = alice.receive_message(keygen_msg_3)?;
-        println!("[ALICE => BOB] PDL challenge c′");
+        println!("[ALICE => BOB] PDL: challenge c′");
         let (bob, keygen_msg_5) = bob.receive_message(keygen_msg_4)?;
-        println!("[BOB => ALICE] Comm(Q̂)");
+        println!("[BOB => ALICE] PDL: Comm(Q̂)");
         let (alice, keygen_msg_6) = alice.receive_message(keygen_msg_5);
-        println!("[ALICE => BOB] Reveal a,b used to produce c′");
+        println!("[ALICE => BOB] PDL: Reveal a,b used to produce c′");
         let (bob, keygen_msg_7) = bob.receive_message(keygen_msg_6)?;
-        println!("[BOB => ALICE] Opens commitment to Q̂");
+        println!("[BOB => ALICE] PDL: Opens commitment to Q̂");
         let (alice, sign_msg_1) = alice.receive_message(keygen_msg_7)?;
 
         // Nonce Generation

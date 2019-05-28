@@ -242,15 +242,18 @@ impl Bob6 {
 
     fn extract_y(&self, s: FE) -> Result<FE, ()> {
         let q = FE::q();
-        let y_maybe = BigInt::mod_mul(&s.invert().to_big_int(), &self.s_tag_tag.to_big_int(), &q);
-        let y_maybe_fe = ECScalar::from(&y_maybe);
-        let Y_maybe: GE = GE::generator() * y_maybe_fe;
+        let y_maybe = s.invert() * self.s_tag_tag;
+        let Y_maybe: GE = GE::generator() * y_maybe;
 
         if Y_maybe.x_coor().unwrap() == self.Y.x_coor().unwrap() {
             if Y_maybe.y_coor().unwrap() != self.Y.y_coor().unwrap() {
-                Ok(ECScalar::from(&BigInt::mod_sub(&q, &y_maybe, &q)))
+                Ok(ECScalar::from(&BigInt::mod_sub(
+                    &q,
+                    &y_maybe.to_big_int(),
+                    &q,
+                )))
             } else {
-                Ok(y_maybe_fe)
+                Ok(y_maybe)
             }
         } else {
             Err(())

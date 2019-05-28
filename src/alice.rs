@@ -1,9 +1,10 @@
 use crate::{ecdsa, messages::*};
 use curv::{
     elliptic::curves::traits::{ECPoint, ECScalar},
-    FE, GE,
+    BigInt, FE, GE,
 };
 use multi_party_ecdsa::protocols::two_party_ecdsa::lindell_2017::{party_one, party_two};
+use secp256k1::Message;
 
 #[derive(Debug, Clone, Copy)]
 pub struct KeyPair {
@@ -25,12 +26,12 @@ impl KeyPair {
 
 #[derive(Clone, Debug)]
 pub struct Alice1 {
-    pub m: FE,
+    pub m: Message,
     pub y: KeyPair,
 }
 
 impl Alice1 {
-    pub fn new(m: FE) -> (Alice1, GE) {
+    pub fn new(m: Message) -> (Alice1, GE) {
         let _self = Alice1 {
             y: KeyPair::new_random(),
             m,
@@ -57,7 +58,7 @@ impl Alice1 {
 }
 
 pub struct Alice2 {
-    m: FE,
+    m: Message,
     y: KeyPair,
     x2: party_two::EcKeyPair,
     bob_keygen_first_msg: party_one::KeyGenFirstMsg,
@@ -102,7 +103,7 @@ impl Alice2 {
 }
 
 pub struct Alice3 {
-    m: FE,
+    m: Message,
     y: KeyPair,
     X: GE,
     x2: party_two::EcKeyPair,
@@ -129,7 +130,7 @@ impl Alice3 {
 }
 
 pub struct Alice4 {
-    m: FE,
+    m: Message,
     y: KeyPair,
     X: GE,
     x2: party_two::EcKeyPair,
@@ -163,7 +164,7 @@ impl Alice4 {
 }
 
 pub struct Alice5 {
-    m: FE,
+    m: Message,
     y: KeyPair,
     X: GE,
     x2: party_two::EcKeyPair,
@@ -207,7 +208,7 @@ impl Alice5 {
             &party_two::Party2Private::set_private_key(&self.x2),
             &self.r2,
             &(R1 * self.y.secret_key),
-            &self.m.to_big_int(),
+            &BigInt::from(&self.m[..]),
         )
         .c3;
 
@@ -229,7 +230,7 @@ impl Alice5 {
 }
 
 pub struct Alice6 {
-    m: FE,
+    m: Message,
     y: KeyPair,
     X: GE,
     R: GE,

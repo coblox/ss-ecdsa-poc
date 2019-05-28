@@ -1,16 +1,18 @@
 #![allow(non_snake_case)]
 use bitcoin_hashes::{self, Hash};
-use curv::{elliptic::curves::traits::ECScalar, BigInt, FE};
+use secp256k1::Message;
 use ss_ecdsa_poc::{alice::Alice1, bob::Bob1};
 
 pub fn main() -> Result<(), ()> {
     // This is the message that Alice wants a signature on
-    let message = bitcoin_hashes::sha256d::Hash::hash(b"Bob pays Alice 10 BTC");
-    let message: FE = ECScalar::from(&BigInt::from(&message[..]));
+    let message =
+        Message::from_slice(&bitcoin_hashes::sha256d::Hash::hash(b"Bob pays Alice 10 BTC")[..])
+            .unwrap();
+
     {
         // KEY GENERATION
         // Y is the public key Bob wants to know the private key for
-        let (alice, Y) = Alice1::new(message.clone());
+        let (alice, Y) = Alice1::new(message);
         println!("Alice choses a lock pre-image {:?}", alice.y.secret_key,);
         println!("[ALICE => BOB] the lock {:?}", Y);
         let (bob, kegen_msg_1) = Bob1::new(Y, message);

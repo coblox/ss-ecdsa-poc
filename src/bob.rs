@@ -8,14 +8,14 @@ use multi_party_ecdsa::protocols::two_party_ecdsa::lindell_2017::{party_one, par
 
 #[derive(Debug)]
 pub struct Bob1 {
-    m: FE,
+    m: secp256k1::Message,
     Y: GE,
     commitment_opening: party_one::CommWitness,
     key_half: party_one::EcKeyPair,
 }
 
 impl Bob1 {
-    pub fn new(Y: GE, m: FE) -> (Bob1, KeyGenMsg1) {
+    pub fn new(Y: GE, m: secp256k1::Message) -> (Bob1, KeyGenMsg1) {
         let (commited_public_key, commitment_opening, key_half) =
             party_one::KeyGenFirstMsg::create_commitments();
         (
@@ -71,7 +71,7 @@ impl Bob1 {
 }
 
 pub struct Bob2 {
-    m: FE,
+    m: secp256k1::Message,
     Y: GE,
     x1: party_one::Party1Private,
     pq_and_c: party_one::PaillierKeyPair,
@@ -100,7 +100,7 @@ impl Bob2 {
 }
 
 pub struct Bob3 {
-    m: FE,
+    m: secp256k1::Message,
     Y: GE,
     x1: party_one::Party1Private,
     pq_and_c: party_one::PaillierKeyPair,
@@ -134,7 +134,7 @@ impl Bob3 {
 }
 
 pub struct Bob4 {
-    m: FE,
+    m: secp256k1::Message,
     Y: GE,
     X: GE,
     pq_and_c: party_one::PaillierKeyPair,
@@ -159,7 +159,7 @@ impl Bob4 {
 }
 
 pub struct Bob5 {
-    m: FE,
+    m: secp256k1::Message,
     Y: GE,
     X: GE,
     pq_and_c: party_one::PaillierKeyPair,
@@ -209,9 +209,10 @@ impl Bob5 {
         let R2 = msg.commitment_opening.comm_witness.public_share;
         let R = msg.R3 * self.r1.secret_share;
         let rx: FE = ECScalar::from(&R.x_coor().unwrap());
+        let m: FE = ECScalar::from(&BigInt::from(&self.m[..]));
 
-        // is s_tag actually what we wanted?
-        if R2 * s_tag == self.X * rx + g * self.m {
+        // Check that alice didn't send us an invalid s_tag
+        if R2 * s_tag == self.X * rx + g * m {
             Ok(s_tag)
         } else {
             Err(())
@@ -220,7 +221,7 @@ impl Bob5 {
 }
 
 pub struct Bob6 {
-    m: FE,
+    m: secp256k1::Message,
     Y: GE,
     X: GE,
     s_tag_tag: FE,

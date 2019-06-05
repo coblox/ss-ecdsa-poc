@@ -16,7 +16,7 @@ paillier = { git = "https://github.com/KZen-networks/rust-paillier"}
 zk-paillier = { git = "https://github.com/KZen-networks/zk-paillier"}
 secp256k1 = "0.12"
 bitcoin_hashes = "0.3"
-merlin = { version = "1.1", features = ["debug-transcript"] }
+merlin = { version = "1.1" }
 rand = "0.6"
 hex = "0.3"
 

@@ -1,5 +1,6 @@
 use crate::{
     commited_nizk::{Commitment, Opening},
+    ecdsa::Signature,
     nizk_sigma_proof::{CompactProof, LabelledStatement, Statement},
 };
 use bitcoin_hashes::Hash;
@@ -59,7 +60,7 @@ macro_rules! extract_schnorr {
 impl From<CompactProof> for KeyGenMsg2 {
     fn from(proof: CompactProof) -> Self {
         let (Y, R3, Y_R3_response) = match proof.get_response(b"Y") {
-            (response, Statement::DDH { g, gx, h, hx }) => (gx, hx, response),
+            (response, Statement::DDH { gx, hx, .. }) => (gx, hx, response),
             _ => unreachable!("R3 is a DDH proof"),
         };
         let (X_beta, X_beta_response) = extract_schnorr!(proof, b"X_beta_alice");
@@ -256,25 +257,19 @@ pub type PdlMsg3 = party_two::PDLSecondMessage;
 pub type PdlMsg4 = party_one::PDLSecondMessage;
 
 // Alice => Bob
-pub struct SignMsg3 {
+pub struct SignMsg1 {
     pub c_beta_redeem_missing_y_and_bob_R: BigInt,
     pub c_beta_refund_missing_bob_R: BigInt,
 }
 
 // Bob => Alice
-pub struct SignMsg4 {
+pub struct SignMsg2 {
     pub s_beta_redeem_missing_y: FE,
-    pub s_beta_refund: FE,
 }
 
 // Alice => Blockchain
 pub struct BlockchainMsg {
-    pub signature: Signature,
-}
-
-pub struct Signature {
-    pub Rx: BigInt,
-    pub s: FE,
+    pub sig_beta_redeem: Signature,
 }
 
 use zk_paillier::zkproofs::{NICorrectKeyProof, RangeProofNi};

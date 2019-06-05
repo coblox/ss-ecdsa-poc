@@ -1,11 +1,12 @@
 use crate::{
     commited_nizk::{commit_nizk, Opening},
     ecdsa,
-    messages::{self, *},
+    messages::*,
     nizk_sigma_proof::{CompactProof, Proof, StatementKind, Witness},
     KeyPair, SSEcdsaTranscript,
 };
-use bitcoin_hashes::Hash;
+use ecdsa::Signature;
+
 use curv::{
     arithmetic::traits::Modulo,
     elliptic::curves::traits::{ECPoint, ECScalar},
@@ -13,7 +14,6 @@ use curv::{
 };
 use merlin::Transcript;
 use multi_party_ecdsa::protocols::two_party_ecdsa::lindell_2017::{party_one, party_two};
-use rand::RngCore;
 
 pub struct BobKeys {
     pub x_beta: KeyPair,
@@ -87,7 +87,6 @@ impl Bob1 {
         let alice_points = alice_keygen.points.clone();
         let alice_proof = CompactProof::from(alice_keygen);
 
-        println!("STATE: {}", transcript.state_id());
         if !alice_proof.verify(transcript, b"ssecdsa_keygen_alice") {
             eprintln!("Failed to verify Alice's proofs");
             return Err(());
@@ -201,7 +200,7 @@ pub struct Bob4 {
 use paillier::{traits::Decrypt, DecryptionKey, Paillier, RawCiphertext, RawPlaintext};
 
 impl Bob4 {
-    pub fn receive_message(self, msg: SignMsg3) -> Result<(Bob5, SignMsg4), ()> {
+    pub fn receive_message(self, msg: SignMsg1) -> Result<(Bob5, SignMsg2), ()> {
         let s_beta_redeem_missing_y = {
             let R_beta_redeem = self.alice_points.R3 * self.keys.r_beta_redeem.secret_key;
             let s_tag = Self::extract_partial_sig(
@@ -210,11 +209,13 @@ impl Bob4 {
                 self.X_beta,
                 R_beta_redeem,
                 self.alice_points.R_beta_redeem,
-            )?;
-            s_tag * &self.keys.r_beta_redeem.secret_key
+                beta_redeem_tx(),
+            )
+            .map_err(|_| eprintln!("beta redeem verify failed"))?;
+            s_tag * self.keys.r_beta_redeem.secret_key.invert()
         };
 
-        let s_beta_refund = {
+        let sig_beta_refund = {
             let R_beta_refund =
                 self.alice_points.R_beta_refund * &self.keys.r_beta_refund.secret_key;
             let s_tag = Self::extract_partial_sig(
@@ -223,8 +224,16 @@ impl Bob4 {
                 self.X_beta,
                 R_beta_refund,
                 self.alice_points.R_beta_refund,
-            )?;
-            s_tag * self.keys.r_beta_refund.secret_key
+                beta_refund_tx(),
+            )
+            .map_err(|_| eprintln!("beta refund verify failed"))?;
+            let s_beta_refund = s_tag * self.keys.r_beta_refund.secret_key.invert();
+            ecdsa::normalize_and_verify(
+                &beta_refund_tx(),
+                &self.X_beta,
+                &s_beta_refund,
+                &R_beta_refund,
+            )?
         };
 
         Ok((
@@ -232,10 +241,10 @@ impl Bob4 {
                 X_beta: self.X_beta,
                 s_beta_redeem_missing_y,
                 Y: self.alice_points.Y,
+                sig_beta_refund,
             },
-            SignMsg4 {
+            SignMsg2 {
                 s_beta_redeem_missing_y,
-                s_beta_refund,
             },
         ))
     }
@@ -246,12 +255,13 @@ impl Bob4 {
         X: GE,
         R: GE,
         R_partial: GE,
+        msg: secp256k1::Message,
     ) -> Result<FE, ()> {
         let tmp: RawPlaintext = Paillier::decrypt(paillier_key, &RawCiphertext::from(c.clone()));
         let s_tag: FE = ECScalar::from(&tmp.0);
         let g = GE::generator();
         let rx: FE = ECScalar::from(&R.x_coor().unwrap());
-        let m: FE = ECScalar::from(&BigInt::from(&beta_redeem_tx()[..]));
+        let m: FE = ECScalar::from(&BigInt::from(&msg[..]));
 
         // Check that alice didn't send us an invalid s_tag
         if R_partial * s_tag == X * rx + g * m {
@@ -266,14 +276,16 @@ pub struct Bob5 {
     X_beta: GE,
     s_beta_redeem_missing_y: FE,
     Y: GE,
+    #[allow(dead_code)]
+    sig_beta_refund: Signature,
 }
 
 impl Bob5 {
     pub fn receive_message(self, msg: BlockchainMsg) -> Result<(Bob7, ()), ()> {
         if !ecdsa::verify(
             &beta_redeem_tx(),
-            &msg.signature.Rx,
-            &msg.signature.s,
+            &msg.sig_beta_redeem.Rx,
+            &msg.sig_beta_redeem.s,
             &self.X_beta,
         ) {
             return Err(());
@@ -281,7 +293,7 @@ impl Bob5 {
 
         Ok((
             Bob7 {
-                y: self.extract_y(msg.signature.s)?,
+                y: self.extract_y(msg.sig_beta_redeem.s)?,
             },
             (),
         ))

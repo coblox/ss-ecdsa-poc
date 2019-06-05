@@ -1,16 +1,12 @@
-use crate::nizk_sigma_proof::{GenRngFromWitness, Proof, Witness};
+use crate::nizk_sigma::{GenRngFromWitness, Proof, Witness};
 use merlin::Transcript;
 use rand::RngCore;
 
-#[derive(Debug, Clone)]
-pub struct Commitment([u8; 32]);
-
-#[derive(Debug, Clone)]
-pub struct Opening<P> {
-    pub nonce: [u8; 32],
-    pub proof: P,
-}
-
+/// Commit to a proof by creating a secret clone of the transcript and then:
+/// - Doing the proof on it and adding a nonce.
+/// - Add a nonce
+/// - Hashing the secret transcript with a nonce
+/// The main transcript is only modified by adding the commitment to it
 pub fn commit_nizk<P: Proof>(
     transcript: &mut Transcript,
     label: &'static [u8],
@@ -39,6 +35,12 @@ pub fn commit_nizk<P: Proof>(
     (commitment, opening)
 }
 
+
+/// The hash of the secret transcript
+#[derive(Debug, Clone)]
+pub struct Commitment([u8; 32]);
+
+/// Represents a received commitment that is waiting to be opened
 #[derive(Clone)]
 pub struct Opener {
     transcript: Transcript,
@@ -47,6 +49,7 @@ pub struct Opener {
 }
 
 impl Opener {
+    /// Validates that an opening to a commitment to a proof is the correct opening and a valid proof against the hidden transcript
     pub fn open<P: Proof>(&self, opening: Opening<P>) -> Result<P, ()> {
         let mut transcript = self.transcript.clone();
         if !opening.proof.verify(&mut transcript, self.label) {
@@ -64,6 +67,12 @@ impl Opener {
     }
 }
 
+/// The opening to a commitment to a proof (the secret nonce and the proof)
+#[derive(Debug, Clone)]
+pub struct Opening<P> {
+    pub nonce: [u8; 32],
+    pub proof: P,
+}
 impl Commitment {
     pub fn receive(self, transcript: &mut Transcript, label: &'static [u8]) -> Opener {
         let commitment_transcript = transcript.clone();
@@ -77,6 +86,7 @@ impl Commitment {
     }
 }
 
+
 trait CommitedNizkTranscript {
     fn add_commitment(&mut self, label: &'static [u8], commitment: &Commitment);
     fn add_commited_nizk_nonce(&mut self, label: &'static [u8], nonce: [u8; 32]);
@@ -84,18 +94,21 @@ trait CommitedNizkTranscript {
 }
 
 impl CommitedNizkTranscript for Transcript {
+    /// Add to the commitment to the main transcript
     fn add_commitment(&mut self, label: &'static [u8], commitment: &Commitment) {
         self.append_message(b"ss-ecdsa-poc/commited-nizk/commitment/1.0", label);
         self.append_message(b"commitment", &commitment.0);
     }
 
+    /// Add a nonce to the secret transcript
     fn add_commited_nizk_nonce(&mut self, label: &'static [u8], nonce: [u8; 32]) {
-        // Add a domin separator to the transcript to indicate we are commiting to the
+        // Add a domin separator to the transcript to indicate we are committing to the
         // above proof
         self.append_message(b"ss-ecdsa-poc/commited-nizk/commited-transcript/1.0", label);
         self.append_message(b"nonce", &nonce);
     }
 
+    /// Get the commitment to the secret transcript
     fn get_commitment(&mut self) -> [u8; 32] {
         // Commit to the transcript by hashing it i.e. get a "challenge"
         let mut commitment = [0u8; 32];
@@ -108,7 +121,7 @@ impl CommitedNizkTranscript for Transcript {
 mod test {
 
     use super::*;
-    use crate::nizk_sigma_proof::{CompactProof, StatementKind};
+    use crate::nizk_sigma::{CompactProof, StatementKind};
     use curv::{
         elliptic::curves::traits::{ECPoint, ECScalar},
         FE, GE,

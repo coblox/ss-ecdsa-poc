@@ -89,10 +89,13 @@ pub struct LabelledStatement {
 }
 
 pub trait Proof {
+    /// Create a new proof statements with witnesses
     fn prove(transcript: &mut Transcript, label: &'static [u8], witnesses: &[Witness]) -> Self;
+    /// Verify the proof is correct
     fn verify(&self, transcript: &mut Transcript, label: &'static [u8]) -> bool;
 }
 
+/// A compact proof contains the challenge and the responses
 #[derive(Debug, Clone)]
 pub struct CompactProof {
     pub challenge: FE,
@@ -100,6 +103,8 @@ pub struct CompactProof {
 }
 
 impl CompactProof {
+
+    /// Utility method to get the response and statement for a certain label. Panics if it doesn't exist.
     pub fn get_response(&self, label: &'static [u8]) -> (FE, Statement) {
         let response = self
             .responses
@@ -282,10 +287,20 @@ mod test {
         {
             let mut transcript_verifier = transcript_verifier.clone();
             let mut proof = proof.clone();
-            proof.challenge = proof.challenge + FE::new_random();
+            proof.challenge = FE::new_random();
             assert!(
                 !proof.verify(&mut transcript_verifier, b"single_schnorr_proof"),
                 "wrong challenge doesn't work"
+            );
+        }
+
+        {
+            let mut transcript_verifier = transcript_verifier.clone();
+            let mut proof = proof.clone();
+            proof.responses[0].0 = FE::new_random();
+            assert!(
+                !proof.verify(&mut transcript_verifier, b"single_schnorr_proof"),
+                "wrong response doesn't work"
             );
         }
 
@@ -305,18 +320,15 @@ mod test {
             );
         }
 
-        {
-            let mut transcript_verifier = transcript_verifier.clone();
-            assert!(
-                proof.verify(&mut transcript_verifier, b"single_schnorr_proof"),
-                "correct label works"
-            );
+        assert!(
+            proof.verify(&mut transcript_verifier, b"single_schnorr_proof"),
+            "correct label works"
+        );
 
-            assert_eq!(
-                transcript_verifier.get_challenge(b"test"),
-                transcript_prover.get_challenge(b"test")
-            );
-        }
+        assert_eq!(
+            transcript_verifier.get_challenge(b"test"),
+            transcript_prover.get_challenge(b"test")
+        );
     }
 
     #[test]
@@ -381,12 +393,9 @@ mod test {
             );
         }
 
-        {
-            let mut transcript_verifier = transcript_verifier.clone();
-            assert!(
-                proof.verify(&mut transcript_verifier, b"multiple"),
-                "doing multiple sigma proofs in parallel"
-            );
-        }
+        assert!(
+            proof.verify(&mut transcript_verifier, b"multiple"),
+            "doing multiple sigma proofs in parallel"
+        );
     }
 }

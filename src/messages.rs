@@ -1,10 +1,10 @@
 use crate::{
     commited_nizk::{Commitment, Opening},
     ecdsa::Signature,
-    nizk_sigma_proof::{CompactProof, LabelledStatement, Statement},
+    nizk_sigma::{CompactProof, Statement},
 };
 use bitcoin_hashes::Hash;
-use curv::{elliptic::curves::traits::ECPoint, BigInt, FE, GE};
+use curv::{BigInt, FE, GE};
 use multi_party_ecdsa::protocols::two_party_ecdsa::lindell_2017::{party_one, party_two};
 
 #[derive(Clone, Debug)]
@@ -87,61 +87,6 @@ impl From<CompactProof> for KeyGenMsg2 {
     }
 }
 
-impl From<KeyGenMsg2> for CompactProof {
-    fn from(msg: KeyGenMsg2) -> CompactProof {
-        let points = msg.points;
-        let responses = msg.responses;
-        let g = GE::generator();
-        CompactProof {
-            challenge: msg.challenge,
-            responses: vec![
-                (
-                    responses.X_beta,
-                    LabelledStatement {
-                        label: b"X_beta_alice",
-                        statement: Statement::Schnorr {
-                            g,
-                            gx: points.X_beta,
-                        },
-                    },
-                ),
-                (
-                    responses.R_beta_redeem,
-                    LabelledStatement {
-                        label: b"R_beta_redeem_alice",
-                        statement: Statement::Schnorr {
-                            g,
-                            gx: points.R_beta_redeem,
-                        },
-                    },
-                ),
-                (
-                    responses.R_beta_refund,
-                    LabelledStatement {
-                        label: b"R_beta_refund_alice",
-                        statement: Statement::Schnorr {
-                            g,
-                            gx: points.R_beta_refund,
-                        },
-                    },
-                ),
-                (
-                    responses.Y_R3,
-                    LabelledStatement {
-                        label: b"Y",
-                        statement: Statement::DDH {
-                            g,
-                            gx: points.Y,
-                            h: points.R_beta_redeem,
-                            hx: points.R3,
-                        },
-                    },
-                ),
-            ],
-        }
-    }
-}
-
 impl From<Opening<CompactProof>> for CommitmentOpening {
     fn from(opening: Opening<CompactProof>) -> Self {
         let nonce = opening.nonce;
@@ -166,62 +111,6 @@ impl From<Opening<CompactProof>> for CommitmentOpening {
                 X_alpha: X_alpha_response,
                 R_beta_redeem: R_beta_redeem_response,
                 R_beta_refund: R_beta_refund_response,
-            },
-        }
-    }
-}
-
-impl From<CommitmentOpening> for Opening<CompactProof> {
-    fn from(opening: CommitmentOpening) -> Self {
-        let points = opening.points;
-        let responses = opening.responses;
-        let g = GE::generator();
-        Opening {
-            nonce: opening.nonce,
-            proof: CompactProof {
-                challenge: opening.challenge,
-                responses: vec![
-                    (
-                        responses.X_alpha,
-                        LabelledStatement {
-                            label: b"X_alpha_bob",
-                            statement: Statement::Schnorr {
-                                g,
-                                gx: points.X_alpha,
-                            },
-                        },
-                    ),
-                    (
-                        responses.X_beta,
-                        LabelledStatement {
-                            label: b"X_beta_bob",
-                            statement: Statement::Schnorr {
-                                g,
-                                gx: points.X_beta,
-                            },
-                        },
-                    ),
-                    (
-                        responses.R_beta_redeem,
-                        LabelledStatement {
-                            label: b"R_beta_redeem_bob",
-                            statement: Statement::Schnorr {
-                                g,
-                                gx: points.R_beta_redeem,
-                            },
-                        },
-                    ),
-                    (
-                        responses.R_beta_refund,
-                        LabelledStatement {
-                            label: b"R_beta_refund_bob",
-                            statement: Statement::Schnorr {
-                                g,
-                                gx: points.R_beta_refund,
-                            },
-                        },
-                    ),
-                ],
             },
         }
     }

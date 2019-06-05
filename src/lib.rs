@@ -4,7 +4,7 @@ pub mod bob;
 pub mod commited_nizk;
 pub mod ecdsa;
 pub mod messages;
-pub mod nizk_sigma_proof;
+pub mod nizk_sigma;
 
 use curv::{
     elliptic::curves::traits::{ECPoint, ECScalar},

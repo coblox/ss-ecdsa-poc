@@ -2,7 +2,7 @@ use crate::{
     commited_nizk::{commit_nizk, Opening},
     ecdsa,
     messages::*,
-    nizk_sigma_proof::{CompactProof, Proof, StatementKind, Witness},
+    nizk_sigma::{CompactProof, Proof, StatementKind, Witness, LabelledStatement, Statement},
     KeyPair, SSEcdsaTranscript,
 };
 use ecdsa::Signature;
@@ -85,7 +85,7 @@ impl Bob1 {
         alice_keygen: KeyGenMsg2,
     ) -> Result<(Bob2, KeyGenMsg3), ()> {
         let alice_points = alice_keygen.points.clone();
-        let alice_proof = CompactProof::from(alice_keygen);
+        let alice_proof = Self::alice_keygen_to_proof(alice_keygen);
 
         if !alice_proof.verify(transcript, b"ssecdsa_keygen_alice") {
             eprintln!("Failed to verify Alice's proofs");
@@ -125,6 +125,59 @@ impl Bob1 {
                 paillier_correct_key_proof,
             },
         ))
+    }
+
+    fn alice_keygen_to_proof(msg: KeyGenMsg2) -> CompactProof {
+        let points = msg.points;
+        let responses = msg.responses;
+        let g = GE::generator();
+        CompactProof {
+            challenge: msg.challenge,
+            responses: vec![
+                (
+                    responses.X_beta,
+                    LabelledStatement {
+                        label: b"X_beta_alice",
+                        statement: Statement::Schnorr {
+                            g,
+                            gx: points.X_beta,
+                        },
+                    },
+                ),
+                (
+                    responses.R_beta_redeem,
+                    LabelledStatement {
+                        label: b"R_beta_redeem_alice",
+                        statement: Statement::Schnorr {
+                            g,
+                            gx: points.R_beta_redeem,
+                        },
+                    },
+                ),
+                (
+                    responses.R_beta_refund,
+                    LabelledStatement {
+                        label: b"R_beta_refund_alice",
+                        statement: Statement::Schnorr {
+                            g,
+                            gx: points.R_beta_refund,
+                        },
+                    },
+                ),
+                (
+                    responses.Y_R3,
+                    LabelledStatement {
+                        label: b"Y",
+                        statement: Statement::DDH {
+                            g,
+                            gx: points.Y,
+                            h: points.R_beta_redeem,
+                            hx: points.R3,
+                        },
+                    },
+                ),
+            ],
+        }
     }
 }
 

@@ -1,8 +1,8 @@
 use crate::{
-    commited_nizk::{Opener, Opening},
+    commited_nizk::Opener,
     ecdsa,
     messages::*,
-    nizk_sigma::{CompactProof, LabelledStatement, Proof, Statement, StatementKind, Witness},
+    nizk_sigma::{CompactProof, Proof, StatementKind, Witness},
     KeyPair, SSEcdsaTranscript,
 };
 use curv::{
@@ -72,22 +72,30 @@ impl Alice1 {
             },
         ];
 
-        let proof = CompactProof::prove(transcript, b"ssecdsa_keygen_alice", &keygen_witness);
+        let (proof, statements) =
+            CompactProof::prove(transcript, b"ssecdsa_keygen_alice", &keygen_witness);
 
         (
             Alice1 {
                 bob_commitment,
                 keys,
             },
-            KeyGenMsg2::from(proof),
+            KeyGenMsg2 {
+                proof,
+                points: AlicePoints::from_statements(statements),
+            },
         )
     }
 
     pub fn receive_message(self, msg: KeyGenMsg3) -> Result<(Alice2, PdlMsg1), ()> {
-        let bob_points = msg.commitment_opening.points.clone();
-        let opening = Self::apply_labels_to_opening(msg.commitment_opening);
+        let commitment_opening = msg.commitment_opening;
+        let bob_points = msg.points;
+
         self.bob_commitment
-            .open(opening)
+            .open(
+                commitment_opening,
+                bob_points.clone().into_statements().as_ref(),
+            )
             .map_err(|_| eprintln!("Failed to verify Bob's proof"))?;
 
         let X_beta = bob_points.X_beta * self.keys.x_beta.secret_key;
@@ -117,60 +125,6 @@ impl Alice1 {
             },
             pdl_first_message,
         ))
-    }
-
-    fn apply_labels_to_opening(opening: CommitmentOpening) -> Opening<CompactProof> {
-        let points = opening.points;
-        let responses = opening.responses;
-        let g = GE::generator();
-        Opening {
-            nonce: opening.nonce,
-            proof: CompactProof {
-                challenge: opening.challenge,
-                responses: vec![
-                    (
-                        responses.X_alpha,
-                        LabelledStatement {
-                            label: b"X_alpha_bob",
-                            statement: Statement::Schnorr {
-                                g,
-                                gx: points.X_alpha,
-                            },
-                        },
-                    ),
-                    (
-                        responses.X_beta,
-                        LabelledStatement {
-                            label: b"X_beta_bob",
-                            statement: Statement::Schnorr {
-                                g,
-                                gx: points.X_beta,
-                            },
-                        },
-                    ),
-                    (
-                        responses.R_beta_redeem,
-                        LabelledStatement {
-                            label: b"R_beta_redeem_bob",
-                            statement: Statement::Schnorr {
-                                g,
-                                gx: points.R_beta_redeem,
-                            },
-                        },
-                    ),
-                    (
-                        responses.R_beta_refund,
-                        LabelledStatement {
-                            label: b"R_beta_refund_bob",
-                            statement: Statement::Schnorr {
-                                g,
-                                gx: points.R_beta_refund,
-                            },
-                        },
-                    ),
-                ],
-            },
-        }
     }
 }
 

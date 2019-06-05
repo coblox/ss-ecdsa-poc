@@ -1,4 +1,4 @@
-use crate::nizk_sigma::{GenRngFromWitness, Proof, Witness};
+use crate::nizk_sigma::{GenRngFromWitness, LabelledStatement, Proof, Witness};
 use merlin::Transcript;
 use rand::RngCore;
 
@@ -11,11 +11,11 @@ pub fn commit_nizk<P: Proof>(
     transcript: &mut Transcript,
     label: &'static [u8],
     witness: &[Witness],
-) -> (Commitment, Opening<P>) {
-    let (commitment, opening) = {
+) -> (Commitment, Opening<P>, Vec<LabelledStatement>) {
+    let (commitment, opening, statements) = {
         // This is our secret transcript for the proof that will be committed to.
         let mut transcript = transcript.clone();
-        let proof = Proof::prove(&mut transcript, label, witness);
+        let (proof, statements) = P::prove(&mut transcript, label, witness);
 
         // Add a random nonce to the transcript to act as the blinding factor in the
         // commitment ie H(x,r)
@@ -27,14 +27,13 @@ pub fn commit_nizk<P: Proof>(
 
         let commitment = transcript.get_commitment();
 
-        (Commitment(commitment), Opening { nonce, proof })
+        (Commitment(commitment), Opening { nonce, proof }, statements)
     };
 
     transcript.add_commitment(label, &commitment);
 
-    (commitment, opening)
+    (commitment, opening, statements)
 }
-
 
 /// The hash of the secret transcript
 #[derive(Debug, Clone)]
@@ -49,10 +48,18 @@ pub struct Opener {
 }
 
 impl Opener {
-    /// Validates that an opening to a commitment to a proof is the correct opening and a valid proof against the hidden transcript
-    pub fn open<P: Proof>(&self, opening: Opening<P>) -> Result<P, ()> {
+    /// Validates that an opening to a commitment to a proof is the correct
+    /// opening and a valid proof against the hidden transcript
+    pub fn open<P: Proof>(
+        &self,
+        opening: Opening<P>,
+        statements: &[LabelledStatement],
+    ) -> Result<P, ()> {
         let mut transcript = self.transcript.clone();
-        if !opening.proof.verify(&mut transcript, self.label) {
+        if !opening
+            .proof
+            .verify(&mut transcript, self.label, statements)
+        {
             return Err(());
         }
 
@@ -67,12 +74,6 @@ impl Opener {
     }
 }
 
-/// The opening to a commitment to a proof (the secret nonce and the proof)
-#[derive(Debug, Clone)]
-pub struct Opening<P> {
-    pub nonce: [u8; 32],
-    pub proof: P,
-}
 impl Commitment {
     pub fn receive(self, transcript: &mut Transcript, label: &'static [u8]) -> Opener {
         let commitment_transcript = transcript.clone();
@@ -86,6 +87,12 @@ impl Commitment {
     }
 }
 
+/// The opening to a commitment to a proof (the secret nonce and the proof)
+#[derive(Debug, Clone)]
+pub struct Opening<P> {
+    pub nonce: [u8; 32],
+    pub proof: P,
+}
 
 trait CommitedNizkTranscript {
     fn add_commitment(&mut self, label: &'static [u8], commitment: &Commitment);
@@ -150,7 +157,7 @@ mod test {
             },
         ];
 
-        let (commitment, opening) =
+        let (commitment, opening, statements) =
             commit_nizk::<CompactProof>(&mut transcript_prover, b"proof_name", &witness);
 
         let opener = commitment.receive(&mut transcript_verifier, b"proof_name");
@@ -160,6 +167,6 @@ mod test {
             transcript_prover.get_commitment(),
             transcript_verifier.get_commitment()
         );
-        assert!(opener.open(opening).is_ok());
+        assert!(opener.open(opening, statements.as_ref()).is_ok());
     }
 }

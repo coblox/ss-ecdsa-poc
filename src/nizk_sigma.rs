@@ -88,31 +88,27 @@ pub struct LabelledStatement {
     pub statement: Statement,
 }
 
-pub trait Proof {
+pub trait Proof: Sized {
     /// Create a new proof statements with witnesses
-    fn prove(transcript: &mut Transcript, label: &'static [u8], witnesses: &[Witness]) -> Self;
+    fn prove(
+        transcript: &mut Transcript,
+        label: &'static [u8],
+        witnesses: &[Witness],
+    ) -> (Self, Vec<LabelledStatement>);
     /// Verify the proof is correct
-    fn verify(&self, transcript: &mut Transcript, label: &'static [u8]) -> bool;
+    fn verify(
+        &self,
+        transcript: &mut Transcript,
+        label: &'static [u8],
+        statements: &[LabelledStatement],
+    ) -> bool;
 }
 
 /// A compact proof contains the challenge and the responses
 #[derive(Debug, Clone)]
 pub struct CompactProof {
     pub challenge: FE,
-    pub responses: Vec<(FE, LabelledStatement)>,
-}
-
-impl CompactProof {
-
-    /// Utility method to get the response and statement for a certain label. Panics if it doesn't exist.
-    pub fn get_response(&self, label: &'static [u8]) -> (FE, Statement) {
-        let response = self
-            .responses
-            .iter()
-            .find(|(_, labelled_statement)| labelled_statement.label == label)
-            .expect("non-existent proof response");
-        (response.0, response.1.statement.clone())
-    }
+    pub responses: Vec<FE>,
 }
 
 impl Proof for CompactProof {
@@ -120,7 +116,7 @@ impl Proof for CompactProof {
         transcript: &mut Transcript,
         label: &'static [u8],
         witnesses: &[Witness],
-    ) -> CompactProof {
+    ) -> (CompactProof, Vec<LabelledStatement>) {
         transcript.start_proof(label);
 
         let statements = witnesses
@@ -134,30 +130,41 @@ impl Proof for CompactProof {
 
         let commitments = produce_commitment(transcript, &witnesses);
 
-        let c = transcript.get_challenge(b"chal");
+        let challenge = transcript.get_challenge(b"chal");
 
-        let response_scalars: Vec<FE> = witnesses
+        let responses: Vec<FE> = witnesses
             .iter()
             .zip(commitments)
-            .map(|(witness, (r, _))| r + c * witness.x)
+            .map(|(witness, (r, _))| r + challenge * witness.x)
             .collect();
 
-        CompactProof {
-            challenge: c,
-            responses: response_scalars.into_iter().zip(statements).collect(),
-        }
+        (
+            CompactProof {
+                challenge,
+                responses,
+            },
+            statements,
+        )
     }
 
-    fn verify(&self, transcript: &mut Transcript, label: &'static [u8]) -> bool {
+    fn verify(
+        &self,
+        transcript: &mut Transcript,
+        label: &'static [u8],
+        statements: &[LabelledStatement],
+    ) -> bool {
+        if statements.len() != self.responses.len() {
+            return false;
+        }
         transcript.start_proof(label);
 
-        for (_, labelled_statement) in &self.responses {
-            transcript.add_statement(&labelled_statement);
+        for statement in statements {
+            transcript.add_statement(&statement);
         }
 
         let minus_c = FE::zero().sub(&self.challenge.get_element());
 
-        for (s, LabelledStatement { label, statement }) in &self.responses {
+        for (s, LabelledStatement { label, statement }) in self.responses.iter().zip(statements) {
             let commitment = statement.recover_commitment(&minus_c, &s);
             transcript.add_commitment(label, &commitment);
         }
@@ -274,22 +281,29 @@ mod test {
             kind: StatementKind::Schnorr { g },
             label: b"foo",
         }];
-        let proof = CompactProof::prove(&mut transcript_prover, b"single_schnorr_proof", &witness);
+        let (proof, statements) =
+            CompactProof::prove(&mut transcript_prover, b"single_schnorr_proof", &witness);
 
+        assert_eq!(statements.len(), 1);
         assert_eq!(
-            proof.responses[0].1,
+            statements[0],
             LabelledStatement {
                 label: b"foo",
-                statement: Statement::Schnorr { g, gx },
+                statement: Statement::Schnorr { g, gx }
             }
         );
 
         {
             let mut transcript_verifier = transcript_verifier.clone();
             let mut proof = proof.clone();
+
             proof.challenge = FE::new_random();
             assert!(
-                !proof.verify(&mut transcript_verifier, b"single_schnorr_proof"),
+                !proof.verify(
+                    &mut transcript_verifier,
+                    b"single_schnorr_proof",
+                    &statements
+                ),
                 "wrong challenge doesn't work"
             );
         }
@@ -297,9 +311,13 @@ mod test {
         {
             let mut transcript_verifier = transcript_verifier.clone();
             let mut proof = proof.clone();
-            proof.responses[0].0 = FE::new_random();
+            proof.responses[0] = FE::new_random();
             assert!(
-                !proof.verify(&mut transcript_verifier, b"single_schnorr_proof"),
+                !proof.verify(
+                    &mut transcript_verifier,
+                    b"single_schnorr_proof",
+                    &statements
+                ),
                 "wrong response doesn't work"
             );
         }
@@ -307,7 +325,7 @@ mod test {
         {
             let mut transcript_verifier = transcript_verifier.clone();
             assert!(
-                !proof.verify(&mut transcript_verifier, b"single_derp_proof"),
+                !proof.verify(&mut transcript_verifier, b"single_derp_proof", &statements),
                 "should fail if wrong label is provided"
             );
         }
@@ -315,13 +333,21 @@ mod test {
         {
             let mut transcript_verifier = transcript_verifier.clone();
             assert!(
-                proof.verify(&mut transcript_verifier, b"single_schnorr_proof"),
+                proof.verify(
+                    &mut transcript_verifier,
+                    b"single_schnorr_proof",
+                    &statements
+                ),
                 "correct label works"
             );
         }
 
         assert!(
-            proof.verify(&mut transcript_verifier, b"single_schnorr_proof"),
+            proof.verify(
+                &mut transcript_verifier,
+                b"single_schnorr_proof",
+                &statements
+            ),
             "correct label works"
         );
 
@@ -345,17 +371,18 @@ mod test {
             kind: StatementKind::DDH { g, h },
             label: b"foo",
         }];
-        let proof = CompactProof::prove(&mut transcript_prover, b"single_ddh_proof", &witness);
+        let (proof, statements) =
+            CompactProof::prove(&mut transcript_prover, b"single_ddh_proof", &witness);
 
         assert_eq!(
-            proof.responses[0].1,
+            statements[0],
             LabelledStatement {
                 label: b"foo",
                 statement: Statement::DDH { g, gx, h, hx },
             }
         );
 
-        assert!(proof.verify(&mut transcript_verifier, b"single_ddh_proof"))
+        assert!(proof.verify(&mut transcript_verifier, b"single_ddh_proof", &statements))
     }
 
     #[test]
@@ -381,20 +408,21 @@ mod test {
             },
         ];
 
-        let proof = CompactProof::prove(&mut transcript_prover, b"multiple", &witness);
+        let (proof, statements) =
+            CompactProof::prove(&mut transcript_prover, b"multiple", &witness);
 
         {
             let mut proof = proof.clone();
             proof.responses.reverse();
             let mut transcript_verifier = transcript_verifier.clone();
             assert!(
-                !proof.verify(&mut transcript_verifier, b"multiple"),
+                !proof.verify(&mut transcript_verifier, b"multiple", &statements),
                 "the order of the responses matters"
             );
         }
 
         assert!(
-            proof.verify(&mut transcript_verifier, b"multiple"),
+            proof.verify(&mut transcript_verifier, b"multiple", &statements),
             "doing multiple sigma proofs in parallel"
         );
     }

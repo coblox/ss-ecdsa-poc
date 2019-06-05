@@ -2,7 +2,7 @@ use crate::{
     commited_nizk::{commit_nizk, Opening},
     ecdsa,
     messages::*,
-    nizk_sigma::{CompactProof, Proof, StatementKind, Witness, LabelledStatement, Statement},
+    nizk_sigma::{CompactProof, Proof, StatementKind, Witness},
     KeyPair, SSEcdsaTranscript,
 };
 use ecdsa::Signature;
@@ -29,6 +29,15 @@ impl BobKeys {
             x_beta: KeyPair::new_random(rng),
             r_beta_redeem: KeyPair::new_random(rng),
             r_beta_refund: KeyPair::new_random(rng),
+        }
+    }
+
+    pub fn points(&self) -> BobPoints {
+        BobPoints {
+            X_alpha: self.x_alpha.public_key,
+            X_beta: self.x_beta.public_key,
+            R_beta_redeem: self.r_beta_redeem.public_key,
+            R_beta_refund: self.r_beta_refund.public_key,
         }
     }
 }
@@ -67,7 +76,7 @@ impl Bob1 {
             },
         ];
 
-        let (commitment, commitment_opening) =
+        let (commitment, commitment_opening, _) =
             commit_nizk::<CompactProof>(transcript, b"ssecdsa_keygen_bob", &keygen_witness);
 
         (
@@ -82,12 +91,14 @@ impl Bob1 {
     pub fn receive_message(
         self,
         transcript: &mut Transcript,
-        alice_keygen: KeyGenMsg2,
+        msg: KeyGenMsg2,
     ) -> Result<(Bob2, KeyGenMsg3), ()> {
-        let alice_points = alice_keygen.points.clone();
-        let alice_proof = Self::alice_keygen_to_proof(alice_keygen);
-
-        if !alice_proof.verify(transcript, b"ssecdsa_keygen_alice") {
+        let alice_points = msg.points;
+        if !msg.proof.verify(
+            transcript,
+            b"ssecdsa_keygen_alice",
+            alice_points.clone().into_statements().as_ref(),
+        ) {
             eprintln!("Failed to verify Alice's proofs");
             return Err(());
         }
@@ -110,6 +121,7 @@ impl Bob1 {
         };
 
         let X_beta = alice_points.X_beta.clone() * &self.keys.x_beta.secret_key;
+        let points = self.keys.points();
 
         Ok((
             Bob2 {
@@ -120,64 +132,12 @@ impl Bob1 {
             },
             KeyGenMsg3 {
                 N_and_c,
-                commitment_opening: self.commitment_opening.into(),
+                commitment_opening: self.commitment_opening,
+                points,
                 paillier_range_proof: range_proof,
                 paillier_correct_key_proof,
             },
         ))
-    }
-
-    fn alice_keygen_to_proof(msg: KeyGenMsg2) -> CompactProof {
-        let points = msg.points;
-        let responses = msg.responses;
-        let g = GE::generator();
-        CompactProof {
-            challenge: msg.challenge,
-            responses: vec![
-                (
-                    responses.X_beta,
-                    LabelledStatement {
-                        label: b"X_beta_alice",
-                        statement: Statement::Schnorr {
-                            g,
-                            gx: points.X_beta,
-                        },
-                    },
-                ),
-                (
-                    responses.R_beta_redeem,
-                    LabelledStatement {
-                        label: b"R_beta_redeem_alice",
-                        statement: Statement::Schnorr {
-                            g,
-                            gx: points.R_beta_redeem,
-                        },
-                    },
-                ),
-                (
-                    responses.R_beta_refund,
-                    LabelledStatement {
-                        label: b"R_beta_refund_alice",
-                        statement: Statement::Schnorr {
-                            g,
-                            gx: points.R_beta_refund,
-                        },
-                    },
-                ),
-                (
-                    responses.Y_R3,
-                    LabelledStatement {
-                        label: b"Y",
-                        statement: Statement::DDH {
-                            g,
-                            gx: points.Y,
-                            h: points.R_beta_redeem,
-                            hx: points.R3,
-                        },
-                    },
-                ),
-            ],
-        }
     }
 }
 

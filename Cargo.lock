@@ -867,6 +867,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "merlin"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "byteorder 1.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "clear_on_drop 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "hex 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "keccak 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rand_core 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
 name = "mime"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1736,8 +1748,11 @@ version = "0.1.0"
 dependencies = [
  "bitcoin_hashes 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "curv 0.1.0 (git+https://github.com/KZen-networks/curv)",
+ "hex 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "merlin 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "multi-party-ecdsa 0.1.0 (git+https://github.com/coblox/multi-party-ecdsa)",
  "paillier 0.2.1-alpha.0 (git+https://github.com/KZen-networks/rust-paillier)",
+ "rand 0.6.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "secp256k1 0.12.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "zk-paillier 0.1.0 (git+https://github.com/KZen-networks/zk-paillier)",
 ]
@@ -2272,6 +2287,7 @@ dependencies = [
 "checksum memchr 2.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "2efc7bc57c883d4a4d6e3246905283d8dae951bb3bd32f49d6ef297f546e1c39"
 "checksum memoffset 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)" = "0f9dc261e2b62d7a622bf416ea3c5245cdd5d9a7fcc428c0d06804dfce1775b3"
 "checksum merkle 1.10.0 (registry+https://github.com/rust-lang/crates.io-index)" = "36cedfa53d6b1eb6cae12b66298e75aa14527b6cd69d6b3ccbf797213f0e9a7a"
+"checksum merlin 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "8c39467de91b004f5b9c06fac5bbc8e7d28309a205ee66905166b70804a71fea"
 "checksum mime 0.2.6 (registry+https://github.com/rust-lang/crates.io-index)" = "ba626b8a6de5da682e1caa06bdb42a335aee5a84db8e5046a3e8ab17ba0a3ae0"
 "checksum mime 0.3.13 (registry+https://github.com/rust-lang/crates.io-index)" = "3e27ca21f40a310bd06d9031785f4801710d566c184a6e15bad4f1d9b65f9425"
 "checksum mime_guess 2.0.0-alpha.6 (registry+https://github.com/rust-lang/crates.io-index)" = "30de2e4613efcba1ec63d8133f344076952090c122992a903359be5a4f99c3ed"

@@ -5,6 +5,7 @@ use curv::{
 use merlin::{Transcript, TranscriptRng};
 use rand::{thread_rng, RngCore};
 
+#[derive(Debug, Clone)]
 pub enum StatementKind {
     Schnorr { g: GE },
     DDH { g: GE, h: GE },
@@ -26,6 +27,7 @@ impl StatementKind {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
     Schnorr { g: GE, gx: GE },
     DDH { g: GE, gx: GE, h: GE, hx: GE },
@@ -80,9 +82,10 @@ impl Witness {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct LabelledStatement {
-    label: &'static [u8],
-    statement: Statement,
+    pub label: &'static [u8],
+    pub statement: Statement,
 }
 
 pub trait Proof {
@@ -90,9 +93,21 @@ pub trait Proof {
     fn verify(&self, transcript: &mut Transcript, label: &'static [u8]) -> bool;
 }
 
+#[derive(Debug, Clone)]
 pub struct CompactProof {
     pub challenge: FE,
     pub responses: Vec<(FE, LabelledStatement)>,
+}
+
+impl CompactProof {
+    pub fn get_response(&self, label: &'static [u8]) -> (FE, Statement) {
+        let response = self
+            .responses
+            .iter()
+            .find(|(_, labelled_statement)| labelled_statement.label == label)
+            .expect("non-existent proof response");
+        (response.0, response.1.statement.clone())
+    }
 }
 
 impl Proof for CompactProof {
@@ -147,7 +162,6 @@ impl Proof for CompactProof {
     }
 }
 
-
 pub trait GenRngFromWitness {
     fn gen_rng_from_witness(&mut self, witnesses: &[Witness]) -> TranscriptRng;
 }
@@ -183,7 +197,7 @@ fn produce_commitment(transcript: &mut Transcript, witnesses: &[Witness]) -> Vec
         .collect()
 }
 
-trait KeyGenSchnorrTranscript {
+trait KeyGenTranscript {
     fn add_point(&mut self, label: &'static [u8], point: GE);
     fn start_proof(&mut self, label: &'static [u8]);
     fn add_commitment(&mut self, label: &'static [u8], commitment: &Commitment);
@@ -191,7 +205,7 @@ trait KeyGenSchnorrTranscript {
     fn get_challenge(&mut self, label: &'static [u8]) -> FE;
 }
 
-impl KeyGenSchnorrTranscript for Transcript {
+impl KeyGenTranscript for Transcript {
     fn add_point(&mut self, label: &'static [u8], point: GE) {
         self.append_message(label, &point.get_element().serialize()[..])
     }
@@ -242,5 +256,137 @@ impl KeyGenSchnorrTranscript for Transcript {
 #[cfg(test)]
 mod test {
 
-    fn single_schnorr() {}
+    use super::*;
+    #[test]
+    fn single_schnorr() {
+        let x = FE::new_random();
+        let g = GE::generator();
+        let gx = g * x;
+        let mut transcript_prover = Transcript::new(b"single_schnorr");
+        let mut transcript_verifier = Transcript::new(b"single_schnorr");
+        let witness = vec![Witness {
+            x,
+            kind: StatementKind::Schnorr { g },
+            label: b"foo",
+        }];
+        let proof = CompactProof::prove(&mut transcript_prover, b"single_schnorr_proof", &witness);
+
+        assert_eq!(
+            proof.responses[0].1,
+            LabelledStatement {
+                label: b"foo",
+                statement: Statement::Schnorr { g, gx },
+            }
+        );
+
+        {
+            let mut transcript_verifier = transcript_verifier.clone();
+            let mut proof = proof.clone();
+            proof.challenge = proof.challenge + FE::new_random();
+            assert!(
+                !proof.verify(&mut transcript_verifier, b"single_schnorr_proof"),
+                "wrong challenge doesn't work"
+            );
+        }
+
+        {
+            let mut transcript_verifier = transcript_verifier.clone();
+            assert!(
+                !proof.verify(&mut transcript_verifier, b"single_derp_proof"),
+                "should fail if wrong label is provided"
+            );
+        }
+
+        {
+            let mut transcript_verifier = transcript_verifier.clone();
+            assert!(
+                proof.verify(&mut transcript_verifier, b"single_schnorr_proof"),
+                "correct label works"
+            );
+        }
+
+        {
+            let mut transcript_verifier = transcript_verifier.clone();
+            assert!(
+                proof.verify(&mut transcript_verifier, b"single_schnorr_proof"),
+                "correct label works"
+            );
+
+            assert_eq!(
+                transcript_verifier.get_challenge(b"test"),
+                transcript_prover.get_challenge(b"test")
+            );
+        }
+    }
+
+    #[test]
+    fn single_ddh() {
+        let x = FE::new_random();
+        let g = GE::generator();
+        let h = GE::base_point2();
+        let hx = h * x;
+        let gx = g * x;
+        let mut transcript_prover = Transcript::new(b"single_ddh");
+        let mut transcript_verifier = Transcript::new(b"single_ddh");
+        let witness = vec![Witness {
+            x,
+            kind: StatementKind::DDH { g, h },
+            label: b"foo",
+        }];
+        let proof = CompactProof::prove(&mut transcript_prover, b"single_ddh_proof", &witness);
+
+        assert_eq!(
+            proof.responses[0].1,
+            LabelledStatement {
+                label: b"foo",
+                statement: Statement::DDH { g, gx, h, hx },
+            }
+        );
+
+        assert!(proof.verify(&mut transcript_verifier, b"single_ddh_proof"))
+    }
+
+    #[test]
+    fn multiple() {
+        let x1 = FE::new_random();
+        let x2 = FE::new_random();
+        let g = GE::generator();
+        let h = GE::base_point2();
+
+        let mut transcript_prover = Transcript::new(b"multiple");
+        let mut transcript_verifier = Transcript::new(b"multiple");
+
+        let witness = vec![
+            Witness {
+                x: x1,
+                kind: StatementKind::Schnorr { g },
+                label: b"x1",
+            },
+            Witness {
+                x: x2,
+                kind: StatementKind::DDH { g, h },
+                label: b"x2",
+            },
+        ];
+
+        let proof = CompactProof::prove(&mut transcript_prover, b"multiple", &witness);
+
+        {
+            let mut proof = proof.clone();
+            proof.responses.reverse();
+            let mut transcript_verifier = transcript_verifier.clone();
+            assert!(
+                !proof.verify(&mut transcript_verifier, b"multiple"),
+                "the order of the responses matters"
+            );
+        }
+
+        {
+            let mut transcript_verifier = transcript_verifier.clone();
+            assert!(
+                proof.verify(&mut transcript_verifier, b"multiple"),
+                "doing multiple sigma proofs in parallel"
+            );
+        }
+    }
 }

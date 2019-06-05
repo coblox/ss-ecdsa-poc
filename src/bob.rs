@@ -1,46 +1,106 @@
-use crate::{ecdsa, messages::*};
+use crate::{
+    commited_nizk::{commit_nizk, Opening},
+    ecdsa,
+    messages::{self, *},
+    nizk_sigma_proof::{CompactProof, Proof, StatementKind, Witness},
+    KeyPair, SSEcdsaTranscript,
+};
+use bitcoin_hashes::Hash;
 use curv::{
     arithmetic::traits::Modulo,
     elliptic::curves::traits::{ECPoint, ECScalar},
     BigInt, FE, GE,
 };
+use merlin::Transcript;
 use multi_party_ecdsa::protocols::two_party_ecdsa::lindell_2017::{party_one, party_two};
+use rand::RngCore;
 
-#[derive(Debug)]
+pub struct BobKeys {
+    pub x_beta: KeyPair,
+    pub x_alpha: KeyPair,
+    pub r_beta_redeem: KeyPair,
+    pub r_beta_refund: KeyPair,
+}
+
+impl BobKeys {
+    pub fn new_random(rng: &mut (impl rand::RngCore + rand::CryptoRng)) -> Self {
+        Self {
+            x_alpha: KeyPair::new_random(rng),
+            x_beta: KeyPair::new_random(rng),
+            r_beta_redeem: KeyPair::new_random(rng),
+            r_beta_refund: KeyPair::new_random(rng),
+        }
+    }
+}
+
 pub struct Bob1 {
-    m: secp256k1::Message,
-    Y: GE,
-    commitment_opening: party_one::CommWitness,
-    key_half: party_one::EcKeyPair,
+    commitment_opening: Opening<CompactProof>,
+    keys: BobKeys,
 }
 
 impl Bob1 {
-    pub fn new(Y: GE, m: secp256k1::Message) -> (Bob1, KeyGenMsg1) {
-        let (commited_public_key, commitment_opening, key_half) =
-            party_one::KeyGenFirstMsg::create_commitments();
+    pub fn new(transcript: &mut Transcript) -> (Bob1, KeyGenMsg1) {
+        let g = GE::generator();
+        let mut rng = transcript.rng();
+        let keys = BobKeys::new_random(&mut rng);
+
+        let keygen_witness = vec![
+            Witness {
+                x: keys.x_alpha.secret_key,
+                kind: StatementKind::Schnorr { g },
+                label: b"X_alpha_bob",
+            },
+            Witness {
+                x: keys.x_beta.secret_key,
+                kind: StatementKind::Schnorr { g },
+                label: b"X_beta_bob",
+            },
+            Witness {
+                x: keys.r_beta_redeem.secret_key,
+                kind: StatementKind::Schnorr { g },
+                label: b"R_beta_redeem_bob",
+            },
+            Witness {
+                x: keys.r_beta_refund.secret_key,
+                kind: StatementKind::Schnorr { g },
+                label: b"R_beta_refund_bob",
+            },
+        ];
+
+        let (commitment, commitment_opening) =
+            commit_nizk::<CompactProof>(transcript, b"ssecdsa_keygen_bob", &keygen_witness);
+
         (
             Self {
-                m,
-                Y,
                 commitment_opening,
-                key_half,
+                keys,
             },
-            commited_public_key,
+            KeyGenMsg1 { commitment },
         )
     }
 
-    pub fn receive_message(self, alice_keygen: KeyGenMsg2) -> Result<(Bob2, KeyGenMsg3), ()> {
-        let commitment_opening = party_one::KeyGenSecondMsg::verify_and_decommit(
-            self.commitment_opening,
-            &alice_keygen.d_log_proof,
-        )
-        .map_err(|_| ())?;
+    pub fn receive_message(
+        self,
+        transcript: &mut Transcript,
+        alice_keygen: KeyGenMsg2,
+    ) -> Result<(Bob2, KeyGenMsg3), ()> {
+        let alice_points = alice_keygen.points.clone();
+        let alice_proof = CompactProof::from(alice_keygen);
 
-        let pq_and_c =
-            party_one::PaillierKeyPair::generate_keypair_and_encrypted_share(&self.key_half);
-        let x1 = party_one::Party1Private::set_private_key(&self.key_half, &pq_and_c);
+        println!("STATE: {}", transcript.state_id());
+        if !alice_proof.verify(transcript, b"ssecdsa_keygen_alice") {
+            eprintln!("Failed to verify Alice's proofs");
+            return Err(());
+        }
 
-        let range_proof = party_one::PaillierKeyPair::generate_range_proof(&pq_and_c, &x1);
+        let pq_and_c = party_one::PaillierKeyPair::generate_keypair_and_encrypted_share(
+            &self.keys.x_beta.into(),
+        );
+
+        let range_proof = party_one::PaillierKeyPair::generate_range_proof(
+            &pq_and_c,
+            &party_one::Party1Private::set_private_key(&self.keys.x_beta.into(), &pq_and_c),
+        );
 
         let paillier_correct_key_proof =
             party_one::PaillierKeyPair::generate_ni_proof_correct_key(&pq_and_c);
@@ -50,19 +110,18 @@ impl Bob1 {
             encrypted_secret_share: pq_and_c.encrypted_share.clone(),
         };
 
-        let X = party_one::compute_pubkey(&x1, &alice_keygen.public_share);
+        let X_beta = alice_points.X_beta.clone() * &self.keys.x_beta.secret_key;
 
         Ok((
             Bob2 {
-                m: self.m,
-                Y: self.Y,
-                x1,
+                keys: self.keys,
+                alice_points,
                 pq_and_c,
-                X,
+                X_beta,
             },
             KeyGenMsg3 {
                 N_and_c,
-                commitment_opening,
+                commitment_opening: self.commitment_opening.into(),
                 paillier_range_proof: range_proof,
                 paillier_correct_key_proof,
             },
@@ -71,25 +130,25 @@ impl Bob1 {
 }
 
 pub struct Bob2 {
-    m: secp256k1::Message,
-    Y: GE,
-    x1: party_one::Party1Private,
+    keys: BobKeys,
+    alice_points: AlicePoints,
     pq_and_c: party_one::PaillierKeyPair,
-    X: GE,
+    X_beta: GE,
 }
 
 impl Bob2 {
-    pub fn receive_message(self, msg: KeyGenMsg4) -> Result<(Bob3, KeyGenMsg5), ()> {
-        let (keygen_msg_5, pdl_decommit, alpha) =
-            party_one::PaillierKeyPair::pdl_first_stage(&self.x1, &msg);
+    pub fn receive_message(self, msg: PdlMsg1) -> Result<(Bob3, PdlMsg2), ()> {
+        let (keygen_msg_5, pdl_decommit, alpha) = party_one::PaillierKeyPair::pdl_first_stage(
+            &party_one::Party1Private::set_private_key(&self.keys.x_beta.into(), &self.pq_and_c),
+            &msg,
+        );
 
         Ok((
             Bob3 {
-                m: self.m,
-                Y: self.Y,
-                x1: self.x1,
+                keys: self.keys,
+                alice_points: self.alice_points,
                 pq_and_c: self.pq_and_c,
-                X: self.X,
+                X_beta: self.X_beta,
                 pdl_first_message: msg,
                 pdl_decommit,
                 alpha,
@@ -100,22 +159,21 @@ impl Bob2 {
 }
 
 pub struct Bob3 {
-    m: secp256k1::Message,
-    Y: GE,
-    x1: party_one::Party1Private,
+    keys: BobKeys,
+    alice_points: AlicePoints,
     pq_and_c: party_one::PaillierKeyPair,
-    X: GE,
+    X_beta: GE,
     pdl_decommit: party_one::PDLdecommit,
     pdl_first_message: party_two::PDLFirstMessage,
     alpha: BigInt,
 }
 
 impl Bob3 {
-    pub fn receive_message(self, msg: KeyGenMsg6) -> Result<(Bob4, KeyGenMsg7), ()> {
-        let keygen_msg_7 = party_one::PaillierKeyPair::pdl_second_stage(
+    pub fn receive_message(self, msg: PdlMsg3) -> Result<(Bob4, PdlMsg4), ()> {
+        let pdl_msg_4 = party_one::PaillierKeyPair::pdl_second_stage(
             &self.pdl_first_message,
             &msg,
-            self.x1.clone(),
+            party_one::Party1Private::set_private_key(&self.keys.x_beta.into(), &self.pq_and_c),
             self.pdl_decommit,
             self.alpha,
         )
@@ -123,96 +181,80 @@ impl Bob3 {
 
         Ok((
             Bob4 {
-                m: self.m,
-                Y: self.Y,
-                X: self.X,
+                keys: self.keys,
+                alice_points: self.alice_points,
+                X_beta: self.X_beta,
                 pq_and_c: self.pq_and_c,
             },
-            keygen_msg_7,
+            pdl_msg_4,
         ))
     }
 }
 
 pub struct Bob4 {
-    m: secp256k1::Message,
-    Y: GE,
-    X: GE,
+    keys: BobKeys,
+    alice_points: AlicePoints,
+    X_beta: GE,
     pq_and_c: party_one::PaillierKeyPair,
 }
+
+use paillier::{traits::Decrypt, DecryptionKey, Paillier, RawCiphertext, RawPlaintext};
 
 impl Bob4 {
-    pub fn receive_message(self, msg: SignMsg1) -> (Bob5, SignMsg2) {
-        let (sign_msg_2, r1) = party_one::EphKeyGenFirstMsg::create();
+    pub fn receive_message(self, msg: SignMsg3) -> Result<(Bob5, SignMsg4), ()> {
+        let s_beta_redeem_missing_y = {
+            let R_beta_redeem = self.alice_points.R3 * self.keys.r_beta_redeem.secret_key;
+            let s_tag = Self::extract_partial_sig(
+                &self.pq_and_c.dk,
+                &msg.c_beta_redeem_missing_y_and_bob_R,
+                self.X_beta,
+                R_beta_redeem,
+                self.alice_points.R_beta_redeem,
+            )?;
+            s_tag * &self.keys.r_beta_redeem.secret_key
+        };
 
-        (
-            Bob5 {
-                m: self.m,
-                Y: self.Y,
-                X: self.X,
-                pq_and_c: self.pq_and_c,
-                alice_commitment: msg,
-                r1,
-            },
-            sign_msg_2,
-        )
-    }
-}
-
-pub struct Bob5 {
-    m: secp256k1::Message,
-    Y: GE,
-    X: GE,
-    pq_and_c: party_one::PaillierKeyPair,
-    alice_commitment: party_two::EphKeyGenFirstMsg,
-    r1: party_one::EphEcKeyPair,
-}
-
-impl Bob5 {
-    pub fn receive_message(self, msg: SignMsg3) -> Result<(Bob6, SignMsg4), ()> {
-        use curv::cryptographic_primitives::proofs::sigma_ec_ddh::*;
-        let _ = party_one::EphKeyGenSecondMsg::verify_commitments_and_dlog_proof(
-            &self.alice_commitment,
-            &msg.commitment_opening,
-        )
-        .map_err(|_| ())?;
-
-        let R2 = msg.commitment_opening.comm_witness.public_share;
-
-        msg.R3_DH_proof
-            .verify(&ECDDHStatement {
-                g1: ECPoint::generator(),
-                h1: self.Y,
-                g2: R2,
-                h2: msg.R3,
-            })
-            .map_err(|_| ())?;
-
-        let s_tag = self.extract_s_tag(&msg)?;
-        let s_tag_tag = s_tag * self.r1.secret_share.invert();
+        let s_beta_refund = {
+            let R_beta_refund =
+                self.alice_points.R_beta_refund * &self.keys.r_beta_refund.secret_key;
+            let s_tag = Self::extract_partial_sig(
+                &self.pq_and_c.dk,
+                &msg.c_beta_refund_missing_bob_R,
+                self.X_beta,
+                R_beta_refund,
+                self.alice_points.R_beta_refund,
+            )?;
+            s_tag * self.keys.r_beta_refund.secret_key
+        };
 
         Ok((
-            Bob6 {
-                m: self.m,
-                Y: self.Y,
-                X: self.X,
-                s_tag_tag: s_tag_tag.clone(),
+            Bob5 {
+                X_beta: self.X_beta,
+                s_beta_redeem_missing_y,
+                Y: self.alice_points.Y,
             },
-            SignMsg4 { s_tag_tag },
+            SignMsg4 {
+                s_beta_redeem_missing_y,
+                s_beta_refund,
+            },
         ))
     }
 
-    fn extract_s_tag(&self, msg: &SignMsg3) -> Result<FE, ()> {
-        use paillier::{traits::Decrypt, Paillier, RawCiphertext};
-        let s_tag: FE =
-            ECScalar::from(&Paillier::decrypt(&self.pq_and_c.dk, &RawCiphertext::from(&msg.c3)).0);
+    fn extract_partial_sig(
+        paillier_key: &DecryptionKey,
+        c: &BigInt,
+        X: GE,
+        R: GE,
+        R_partial: GE,
+    ) -> Result<FE, ()> {
+        let tmp: RawPlaintext = Paillier::decrypt(paillier_key, &RawCiphertext::from(c.clone()));
+        let s_tag: FE = ECScalar::from(&tmp.0);
         let g = GE::generator();
-        let R2 = msg.commitment_opening.comm_witness.public_share;
-        let R = msg.R3 * self.r1.secret_share;
         let rx: FE = ECScalar::from(&R.x_coor().unwrap());
-        let m: FE = ECScalar::from(&BigInt::from(&self.m[..]));
+        let m: FE = ECScalar::from(&BigInt::from(&beta_redeem_tx()[..]));
 
         // Check that alice didn't send us an invalid s_tag
-        if R2 * s_tag == self.X * rx + g * m {
+        if R_partial * s_tag == X * rx + g * m {
             Ok(s_tag)
         } else {
             Err(())
@@ -220,16 +262,20 @@ impl Bob5 {
     }
 }
 
-pub struct Bob6 {
-    m: secp256k1::Message,
+pub struct Bob5 {
+    X_beta: GE,
+    s_beta_redeem_missing_y: FE,
     Y: GE,
-    X: GE,
-    s_tag_tag: FE,
 }
 
-impl Bob6 {
+impl Bob5 {
     pub fn receive_message(self, msg: BlockchainMsg) -> Result<(Bob7, ()), ()> {
-        if !ecdsa::verify(&self.m, &msg.signature.Rx, &msg.signature.s, &self.X) {
+        if !ecdsa::verify(
+            &beta_redeem_tx(),
+            &msg.signature.Rx,
+            &msg.signature.s,
+            &self.X_beta,
+        ) {
             return Err(());
         }
 
@@ -243,11 +289,13 @@ impl Bob6 {
 
     fn extract_y(&self, s: FE) -> Result<FE, ()> {
         let q = FE::q();
-        let y_maybe = s.invert() * self.s_tag_tag;
+        let y_maybe = s.invert() * self.s_beta_redeem_missing_y;
         let Y_maybe: GE = GE::generator() * y_maybe;
+        let Y = &self.Y;
 
-        if Y_maybe.x_coor().unwrap() == self.Y.x_coor().unwrap() {
-            if Y_maybe.y_coor().unwrap() != self.Y.y_coor().unwrap() {
+        // NOTE: There may be faster ways of checking this
+        if Y_maybe.x_coor().unwrap() == Y.x_coor().unwrap() {
+            if Y_maybe.y_coor().unwrap() != Y.y_coor().unwrap() {
                 Ok(ECScalar::from(&BigInt::mod_sub(
                     &q,
                     &y_maybe.to_big_int(),
